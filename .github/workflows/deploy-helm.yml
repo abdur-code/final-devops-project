@@ -1,0 +1,48 @@
+# Manual Helm deploy to EKS. Needs repo variables AWS_DEPLOY_ROLE_ARN, EKS_CLUSTER_NAME, AWS_REGION.
+name: Deploy (Helm, manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (full commit SHA from GHCR)"
+        required: true
+      values_file:
+        description: "Values file in helm/stockpilot/"
+        default: values-prod.yaml
+        type: choice
+        options: [values-dev.yaml, values-prod.yaml]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - name: Configure kubectl
+        run: aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER_NAME }}" --region "${{ vars.AWS_REGION }}"
+      - name: helm upgrade --install
+        env:
+          TAG: ${{ inputs.image_tag }}
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          helm upgrade --install stockpilot helm/stockpilot -n stockpilot \
+            -f "helm/stockpilot/${{ inputs.values_file }}" \
+            --set postgres.existingSecret=stockpilot-db \
+            --set backend.image.repository="ghcr.io/$OWNER/stockpilot-backend" \
+            --set frontend.image.repository="ghcr.io/$OWNER/stockpilot-frontend" \
+            --set backend.image.tag="$TAG" --set frontend.image.tag="$TAG" \
+            --atomic --wait --timeout 10m
+      - name: Verify
+        run: |
+          kubectl rollout status deploy/stockpilot-backend -n stockpilot
+          helm test stockpilot -n stockpilot --logs

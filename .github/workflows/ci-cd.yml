@@ -1,0 +1,349 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "gitops/environments/**"
+      - "**/*.md"
+      - "docs/**"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "24"
+  TRIVY_VERSION: v0.74.0
+  GITLEAKS_VERSION: 8.30.1
+  KUBECONFORM_VERSION: v0.7.0
+
+jobs:
+  backend-test:
+    name: Backend lint + tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: application/backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: application/backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Lint (ruff)
+        run: ruff check . && ruff format --check .
+      - name: "Unit tests (quality gate: >= 80% coverage)"
+        run: pytest --cov=app --cov-report=term --cov-report=xml --cov-fail-under=80 --junitxml=pytest-report.xml
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: backend-test-reports
+          path: |
+            application/backend/coverage.xml
+            application/backend/pytest-report.xml
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: application/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: application/frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+
+  k8s-lint:
+    name: Helm + manifest validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - name: Install kubeconform
+        run: curl -sSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | sudo tar xz -C /usr/local/bin kubeconform
+      - name: helm lint (all environments)
+        run: |
+          for f in values.yaml values-dev.yaml values-prod.yaml values-ci.yaml; do
+            helm lint helm/stockpilot -f "helm/stockpilot/$f" --set postgres.password=lint \
+              --set backend.image.tag=lint --set frontend.image.tag=lint
+          done
+      - name: Validate rendered chart against Kubernetes schemas
+        run: |
+          for f in values.yaml values-dev.yaml values-prod.yaml; do
+            helm template stockpilot helm/stockpilot -n stockpilot -f "helm/stockpilot/$f" \
+              --set postgres.password=lint --set backend.image.tag=lint --set frontend.image.tag=lint \
+              --api-versions monitoring.coreos.com/v1 \
+            | kubeconform -strict -summary -kubernetes-version 1.34.0 \
+                -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          done
+      - name: Validate raw manifests (kustomize)
+        run: |
+          cp kubernetes/db.env.example kubernetes/db.env
+          kubectl kustomize kubernetes | kubeconform -strict -summary -kubernetes-version 1.34.0
+      - name: Dashboard copies are in sync
+        run: diff monitoring/grafana/dashboards/stockpilot.json helm/stockpilot/dashboards/stockpilot.json
+
+  sast:
+    name: SAST (Bandit + Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:1.178.0
+    steps:
+      - uses: actions/checkout@v7
+      - name: Semgrep (fails on ERROR-severity findings)
+        run: |
+          semgrep scan --metrics=off --error --severity ERROR \
+            --config p/python --config p/javascript --config p/dockerfile \
+            --config security/semgrep-rules.yml \
+            application docker
+      - name: Bandit (Python security linter, fails on medium+)
+        run: |
+          pip install --quiet bandit==1.9.4
+          bandit -c security/bandit.yaml -r application/backend/app -ll
+
+  sca:
+    name: SCA (dependency vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: pip-audit (Python, fails on any known CVE)
+        run: |
+          pip install --quiet pip-audit==2.10.1
+          pip-audit -r application/backend/requirements.txt --desc
+      - name: npm audit (JavaScript, fails on high/critical)
+        working-directory: application/frontend
+        run: npm audit --audit-level=high
+
+  secret-scan:
+    name: Secret scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | sudo tar xz -C /usr/local/bin gitleaks
+      - name: Scan git history
+        run: gitleaks git . --config security/gitleaks.toml --redact --verbose
+
+  iac-scan:
+    name: IaC misconfiguration scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Trivy config scan (fails on CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL
+          exit-code: "1"
+          trivyignores: security/.trivyignore
+
+  build-images:
+    name: Build + scan ${{ matrix.component }} image
+    needs: [backend-test, frontend-build, k8s-lint, sast, sca, secret-scan, iac-scan]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Docker build
+        run: |
+          docker build \
+            -f docker/${{ matrix.component }}.Dockerfile \
+            --build-arg GIT_SHA=${{ github.sha }} \
+            --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }} \
+            -t stockpilot-${{ matrix.component }}:ci \
+            application/${{ matrix.component }}
+      - name: "Trivy image scan (security gate: HIGH/CRITICAL with a fix available)"
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: stockpilot-${{ matrix.component }}:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: security/.trivyignore
+      - name: Generate SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: stockpilot-${{ matrix.component }}:ci
+          format: cyclonedx
+          output: sbom-${{ matrix.component }}.cdx.json
+          skip-setup-trivy: true
+      - name: Save image for the next jobs
+        run: docker save stockpilot-${{ matrix.component }}:ci -o image-${{ matrix.component }}.tar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: image-${{ matrix.component }}
+          path: image-${{ matrix.component }}.tar
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom-${{ matrix.component }}
+          path: sbom-${{ matrix.component }}.cdx.json
+
+  k8s-smoke-test:
+    name: Deploy to ephemeral kind cluster
+    needs: build-images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: image-*
+          merge-multiple: true
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          cluster_name: stockpilot-ci
+      - name: Load images into kind
+        run: |
+          kind load image-archive image-backend.tar --name stockpilot-ci
+          kind load image-archive image-frontend.tar --name stockpilot-ci
+      - name: helm install (waits for every pod to be Ready)
+        run: |
+          helm install stockpilot helm/stockpilot -n stockpilot --create-namespace \
+            -f helm/stockpilot/values-ci.yaml \
+            --set postgres.password="$(openssl rand -hex 16)" \
+            --wait --timeout 5m
+      - name: helm test
+        run: helm test stockpilot -n stockpilot --logs
+      - name: End-to-end check through the frontend proxy
+        run: |
+          kubectl port-forward -n stockpilot svc/stockpilot-frontend 8080:80 &
+          sleep 5
+          curl -fsS http://localhost:8080/api/info
+          curl -fsS -X POST http://localhost:8080/api/items -H 'Content-Type: application/json' \
+            -d '{"sku":"CI-SMOKE","name":"pipeline smoke test","quantity":3}'
+          curl -fsS http://localhost:8080/api/items/stats | grep -q '"total_skus":1'
+          echo "application works end-to-end inside Kubernetes"
+      - name: Debug info on failure
+        if: failure()
+        run: |
+          kubectl get all,pvc,events -n stockpilot
+          kubectl describe pods -n stockpilot
+          kubectl logs -n stockpilot -l app.kubernetes.io/component=backend --all-containers --tail=100
+
+  push-images:
+    name: Push images to GHCR
+    needs: k8s-smoke-test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve registry path
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"   # registry names must be lowercase
+
+      - uses: actions/download-artifact@v8
+        if: vars.MULTI_ARCH != 'true'
+        with:
+          pattern: image-*
+          merge-multiple: true
+      - name: Tag with the commit SHA and push (amd64)
+        if: vars.MULTI_ARCH != 'true'
+        run: |
+          for c in backend frontend; do
+            docker load -i image-$c.tar
+            docker tag stockpilot-$c:ci "ghcr.io/$OWNER/stockpilot-$c:${GITHUB_SHA}"
+            docker push "ghcr.io/$OWNER/stockpilot-$c:${GITHUB_SHA}"
+          done
+
+      # MULTI_ARCH=true: also build arm64 (kind on Apple Silicon)
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        if: vars.MULTI_ARCH == 'true'
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: vars.MULTI_ARCH == 'true'
+      - name: Build and push backend (amd64 + arm64)
+        if: vars.MULTI_ARCH == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: application/backend
+          file: docker/backend.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: ghcr.io/${{ env.OWNER }}/stockpilot-backend:${{ github.sha }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          push: true
+      - name: Build and push frontend (amd64 + arm64)
+        if: vars.MULTI_ARCH == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: application/frontend
+          file: docker/frontend.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: ghcr.io/${{ env.OWNER }}/stockpilot-frontend:${{ github.sha }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          push: true
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published images"
+            echo "- ghcr.io/$OWNER/stockpilot-backend:${GITHUB_SHA}"
+            echo "- ghcr.io/$OWNER/stockpilot-frontend:${GITHUB_SHA}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  gitops-promote:
+    name: Promote to dev (GitOps commit)
+    needs: push-images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Write the new image tag to Git
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          yq -i "
+            .backend.image.repository = \"ghcr.io/$OWNER/stockpilot-backend\" |
+            .backend.image.tag = \"$GITHUB_SHA\" |
+            .frontend.image.repository = \"ghcr.io/$OWNER/stockpilot-frontend\" |
+            .frontend.image.tag = \"$GITHUB_SHA\"
+          " gitops/environments/dev/values.yaml
+          yq -i "(.images[] | select(.name == \"*stockpilot-backend\")).newTag = \"$GITHUB_SHA\" |
+                 (.images[] | select(.name == \"*stockpilot-frontend\")).newTag = \"$GITHUB_SHA\"" kubernetes/kustomization.yaml
+          git diff --stat
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gitops/environments/dev/values.yaml kubernetes/kustomization.yaml
+          git diff --cached --quiet && { echo "nothing to promote"; exit 0; }
+          git commit -m "chore(gitops): deploy ${GITHUB_SHA::7} to dev [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main
