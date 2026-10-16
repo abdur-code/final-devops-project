@@ -45,4 +45,4 @@ jobs:
       - name: Verify
         run: |
           kubectl rollout status deploy/stockpilot-backend -n stockpilot
-          helm test stockpilot -n stockpilot --logs
+          helm test stockpilot -n stockpilot

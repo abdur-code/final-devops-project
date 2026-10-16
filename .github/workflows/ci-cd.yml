@@ -234,7 +234,7 @@ jobs:
             --set postgres.password="$(openssl rand -hex 16)" \
             --wait --timeout 5m
       - name: helm test
-        run: helm test stockpilot -n stockpilot --logs
+        run: helm test stockpilot -n stockpilot
       - name: End-to-end check through the frontend proxy
         run: |
           kubectl port-forward -n stockpilot svc/stockpilot-frontend 8080:80 &
