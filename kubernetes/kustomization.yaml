@@ -19,6 +19,6 @@ secretGenerator:
       disableNameSuffixHash: true
 images:
   - name: ghcr.io/abdur-code/stockpilot-backend
-    newTag: "39d7cd39db4dfe044c89a83bf62dbcf0d41e55a5"
+    newTag: "bc6a932ea28e0f78f9271fd7db0d0d0200f835e9"
   - name: ghcr.io/abdur-code/stockpilot-frontend
-    newTag: "39d7cd39db4dfe044c89a83bf62dbcf0d41e55a5"
+    newTag: "bc6a932ea28e0f78f9271fd7db0d0d0200f835e9"
