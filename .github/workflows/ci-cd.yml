@@ -114,8 +114,9 @@ jobs:
             application docker
       - name: Bandit (Python security linter, fails on medium+)
         run: |
-          pip install --quiet bandit==1.9.4
-          bandit -c security/bandit.yaml -r application/backend/app -ll
+          python3 -m venv /tmp/bandit
+          /tmp/bandit/bin/pip install --quiet bandit==1.9.4
+          /tmp/bandit/bin/bandit -c security/bandit.yaml -r application/backend/app -ll
 
   sca:
     name: SCA (dependency vulnerabilities)
