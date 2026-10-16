@@ -3,13 +3,13 @@ environment: dev
 backend:
   image:
     repository: ghcr.io/abdur-code/stockpilot-backend
-    tag: "bc6a932ea28e0f78f9271fd7db0d0d0200f835e9"
+    tag: "6c342d5eb2456099d88be34d7ed5cf3ada1555af"
   logLevel: DEBUG
   enableLoadEndpoint: true
 frontend:
   image:
     repository: ghcr.io/abdur-code/stockpilot-frontend
-    tag: "bc6a932ea28e0f78f9271fd7db0d0d0200f835e9"
+    tag: "6c342d5eb2456099d88be34d7ed5cf3ada1555af"
   replicaCount: 2
 postgres:
   existingSecret: stockpilot-db
