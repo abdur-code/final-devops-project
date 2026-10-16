@@ -1,0 +1,8 @@
+backend:
+  image:
+    repository: ghcr.io/abdur-code/stockpilot-backend
+    tag: ""
+frontend:
+  image:
+    repository: ghcr.io/abdur-code/stockpilot-frontend
+    tag: ""

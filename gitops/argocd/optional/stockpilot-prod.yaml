@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: stockpilot-prod
+  namespace: argocd
+spec:
+  project: stockpilot
+  sources:
+    - repoURL: https://github.com/abdur-code/final-devops-project.git
+      targetRevision: main
+      path: helm/stockpilot
+      helm:
+        releaseName: stockpilot
+        valueFiles:
+          - values.yaml
+          - values-prod.yaml
+          - $values/gitops/environments/prod/values.yaml
+    - repoURL: https://github.com/abdur-code/final-devops-project.git
+      targetRevision: main
+      ref: values
+  destination: { server: https://kubernetes.default.svc, namespace: stockpilot-prod }
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]

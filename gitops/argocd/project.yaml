@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: stockpilot
+  namespace: argocd
+spec:
+  description: StockPilot application and its monitoring stack
+  sourceRepos:
+    - https://github.com/abdur-code/final-devops-project.git
+    - https://prometheus-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: stockpilot }
+    - { server: https://kubernetes.default.svc, namespace: stockpilot-prod }
+    - { server: https://kubernetes.default.svc, namespace: monitoring }
+    - { server: https://kubernetes.default.svc, namespace: argocd }
+    - { server: https://kubernetes.default.svc, namespace: kube-system }
+  clusterResourceWhitelist:
+    - { group: "*", kind: "*" }
+  namespaceResourceWhitelist:
+    - { group: "*", kind: "*" }

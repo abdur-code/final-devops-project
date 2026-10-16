@@ -1,0 +1,21 @@
+# image tags are written by the CI gitops-promote job
+environment: dev
+backend:
+  image:
+    repository: ghcr.io/abdur-code/stockpilot-backend
+    tag: ""
+  logLevel: DEBUG
+  enableLoadEndpoint: true
+frontend:
+  image:
+    repository: ghcr.io/abdur-code/stockpilot-frontend
+    tag: ""
+  replicaCount: 2
+postgres:
+  existingSecret: stockpilot-db
+ingress:
+  enabled: true
+  host: stockpilot.local
+hpa:
+  minReplicas: 2
+  maxReplicas: 4
