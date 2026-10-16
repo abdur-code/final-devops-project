@@ -598,26 +598,60 @@ Run `pre-commit install` once per clone so Gitleaks checks every commit before i
 Scenario: `pipeline: bad-gitops-tag`
 
 ### 1. Identify
-After the merge, Argo CD marks `stockpilot-dev` as *Degraded*. The new backend pods are in `ImagePullBackOff` and the old ones keep serving.
+PR #10 ("chore(gitops): deploy hotfix to dev") changed the backend tag in `gitops/environments/dev/values.yaml`. Its CI run (#17) passed: nothing in the pipeline checks whether a tag in the GitOps values exists in GHCR. I merged it at 15:32:57 UTC.
+
+About a minute later Argo CD had synced the merge commit. A new backend pod was stuck in `Init:ImagePullBackOff`, and the app showed `Synced` / `Progressing`. The two old backend pods kept running and the app kept answering 200, because the rollout uses `maxUnavailable: 0`.
 
 ### 2. Investigate
-```bash
-Argo CD UI → stockpilot-dev → backend pod → Events: image not found
-git log -1 -- gitops/environments/dev/values.yaml   # the commit that set tag 0000000-does-not-exist
 ```
+$ kubectl get events -n stockpilot --field-selector involvedObject.name=<new-backend-pod>,reason=Failed
+failed to resolve reference "ghcr.io/abdur-code/stockpilot-backend:0000000-does-not-exist": ... not found
 
-### 3. Root cause
-Argo CD deploys whatever Git says, and Git now asks for an image tag that was never built.
+$ kubectl get applications stockpilot-dev -n argocd -o jsonpath='{.status.sync.revisions[0]}'
+2c0caa4154372d47a0749b888ef5804305a72709          # the merge commit of PR #10
 
-### 4. Fix
-`git revert <commit> && git push`. Argo CD picks up the revert within a minute. Fixing it with `kubectl` wouldn't stick, because self-heal would put the bad tag straight back.
-
-### 5. Verify
-```bash
-Argo CD app Synced/Healthy; `kubectl get pods -n stockpilot` all Ready.
+$ git diff origin/main~1 origin/main -- gitops/environments/dev/values.yaml
+-    tag: "bc6a932ea28e0f78f9271fd7db0d0d0200f835e9"
++    tag: "0000000-does-not-exist"
 ```
 
 ![scenario 14](screenshots/ts-14.png)
 
+The app only turned `Degraded` once the Deployment's 600-second progress deadline ran out:
+```
+$ kubectl get applications stockpilot-dev -n argocd -o jsonpath='health: {.status.health.status} since {.status.health.lastTransitionTime}'
+health: Degraded since 2026-10-16T15:43:57Z
+$ kubectl get deploy stockpilot-backend -n stockpilot -o jsonpath='{range .status.conditions[*]}{.type}: {.reason}{"\n"}{end}'
+Available: MinimumReplicasAvailable
+Progressing: ProgressDeadlineExceeded
+```
+So for the first ten minutes the only signs were the stuck pod and "Progressing". Users still saw a working app the whole time.
+
+![scenario 14 degraded](screenshots/ts-14-degraded.png)
+
+### 3. Root cause
+Argo CD deploys whatever Git says, and Git now asked for a backend image that CI never built. The tag was typed by hand in a PR instead of being written by the gitops-promote job.
+
+### 4. Fix
+I reverted the merge on `main` and pushed. No `kubectl` changes: self-heal would put the bad tag straight back.
+```bash
+git revert -m 1 --no-edit HEAD~1      # HEAD~1 was the merge commit 2c0caa4
+git push
+```
+The push only touched docs and `gitops/environments/`, so CI didn't run. Argo CD picked up the revert within seconds.
+
+### 5. Verify
+```
+$ kubectl get applications stockpilot-dev -n argocd -o jsonpath='{.status.sync.revisions[0]}  {.status.sync.status}/{.status.health.status}'
+ba56414fdc6897cd7da6d0d33b9fc8eec8d0cd97  Synced/Healthy
+
+$ kubectl get pods -n stockpilot -l app.kubernetes.io/component=backend -o custom-columns=...
+stockpilot-backend-79b4575b8-gwhkh   true   ghcr.io/abdur-code/stockpilot-backend:bc6a932ea28e0f78f9271fd7db0d0d0200f835e9
+stockpilot-backend-79b4575b8-qcpdc   true   ghcr.io/abdur-code/stockpilot-backend:bc6a932ea28e0f78f9271fd7db0d0d0200f835e9
+```
+The broken pod is gone, and the two pods that served traffic during the incident never restarted.
+
+![scenario 14 fixed](screenshots/ts-14-fixed.png)
+
 ### 6. Prevention
-Only CI writes image tags, and only for SHAs it has just pushed. Rolling back is a `git revert`, and `git log` shows who deployed what and when.
+Only CI should write image tags, and only for SHAs it has just pushed; a PR that edits a tag by hand should get a second look. A check in CI that runs `docker manifest inspect` on every tag in `gitops/environments/` would have failed this PR before the merge. Rolling back is a `git revert`, and `git log` on the values file shows who deployed what and when.
