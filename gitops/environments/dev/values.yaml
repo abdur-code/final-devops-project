@@ -3,7 +3,7 @@ environment: dev
 backend:
   image:
     repository: ghcr.io/abdur-code/stockpilot-backend
-    tag: "bc6a932ea28e0f78f9271fd7db0d0d0200f835e9"
+    tag: "0000000-does-not-exist"
   logLevel: DEBUG
   enableLoadEndpoint: true
 frontend:
