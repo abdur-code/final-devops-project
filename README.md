@@ -468,6 +468,8 @@ kubectl top pods -n <ns>
 | Trivy scan, backend image | ![trivy backend](docs/screenshots/m6-trivy-backend.png) |
 | Trivy scan, frontend image | ![trivy frontend](docs/screenshots/m6-trivy-frontend.png) |
 | Images in GHCR, tagged with the commit SHA | ![ghcr](docs/screenshots/04-ghcr.png) |
+| Security gate blocking a vulnerable dependency (PR #7) | ![gate](docs/screenshots/03-security-gate.png) |
+| pip-audit findings that failed the SCA gate | ![sca](docs/screenshots/03-sca-findings.png) |
 
 ## 16. Lessons learned
 

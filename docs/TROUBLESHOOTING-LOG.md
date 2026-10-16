@@ -357,25 +357,31 @@ The pipeline run on the branch turns green.
 Scenario: `pipeline: vulnerable-dep`
 
 ### 1. Identify
-All the tests pass, but the *SCA* job fails and the image build is skipped.
+PR #7 (CI/CD run #10): tests, SAST, secret scanning and the IaC scan pass, but the *SCA* job fails after 17s.
+The build, kind deploy, GHCR push and GitOps promote jobs are skipped, so no image was built.
+
+![security gate](screenshots/03-security-gate.png)
 
 ### 2. Investigate
-```bash
-Actions → SCA → pip-audit lists `requests 2.31.0` with several advisories and the versions that fix them
+The pip-audit step of the SCA job:
+```
+Found 6 known vulnerabilities in 1 package
+requests 2.31.0  PYSEC-2026-1873  fixed in 2.32.0  TLS verification can stay off on a reused Session connection
+requests 2.31.0  PYSEC-2026-1872  fixed in 2.32.4  .netrc credentials can leak for crafted URLs
+requests 2.31.0  PYSEC-2026-2275  fixed in 2.33.0  predictable temp file in extract_zipped_paths()
 ```
 
 ### 3. Root cause
 The new dependency is pinned to a version with published CVEs.
 
 ### 4. Fix
-Remove the dependency, since it isn't used, or upgrade to the fixed version pip-audit reports.
+I closed PR #7 without merging and deleted the branch, so the dependency never reached `main`. If the
+library were really needed, the fix is to pin `requests>=2.33.0`, the highest fixed version pip-audit reports.
 
 ### 5. Verify
-```bash
-SCA job green; Trivy image scan also passes.
-```
+`main` stays green: the last push to `main` passed every gate, including pip-audit and the Trivy image scans.
 
-![scenario 12](screenshots/ts-12.png)
+![scenario 12](screenshots/03-sca-findings.png)
 
 ### 6. Prevention
 Dependabot opens upgrade PRs every week, and the nightly workflow re-scans the deployed images for newly published CVEs.
