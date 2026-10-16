@@ -1,0 +1,81 @@
+name: stockpilot
+
+x-db-env: &db-env
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: stockpilot
+  DB_USER: stockpilot
+  DB_PASSWORD: ${POSTGRES_PASSWORD:-stockpilot-local}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: stockpilot
+      POSTGRES_USER: stockpilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stockpilot-local}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockpilot -d stockpilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: ../application/backend
+      dockerfile: ../../docker/backend.Dockerfile
+    image: stockpilot-backend:local
+    command: ["alembic", "upgrade", "head"]
+    environment: *db-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    image: stockpilot-backend:local
+    environment:
+      <<: *db-env
+      APP_ENV: compose
+      LOG_LEVEL: INFO
+      ENABLE_LOAD_ENDPOINT: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ../application/frontend
+      dockerfile: ../../docker/frontend.Dockerfile
+    image: stockpilot-frontend:local
+    environment:
+      BACKEND_UPSTREAM: backend:8000
+    ports:
+      - "3000:8080"
+    depends_on:
+      - backend
+
+  prometheus:
+    profiles: [monitoring]
+    image: prom/prometheus:v3.15.0
+    volumes:
+      - ../monitoring/local/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    profiles: [monitoring]
+    image: grafana/grafana:13.2.3
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ../monitoring/local/grafana-provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+
+volumes:
+  pgdata:
