@@ -1,0 +1,74 @@
+{{- $sel := dict "ctx" . "component" "backend" }}
+{{- $tag := required "backend.image.tag is required (an immutable Git commit SHA, never latest)" .Values.backend.image.tag }}
+{{- $img := printf "%s:%s" .Values.backend.image.repository (toString $tag) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stockpilot.fullname" . }}-backend
+  labels:
+    {{- include "stockpilot.labels" . | nindent 4 }}
+    {{- include "stockpilot.selector" $sel | nindent 4 }}
+spec:
+  {{- if not .Values.hpa.enabled }}
+  replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: {{- include "stockpilot.selector" $sel | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "stockpilot.selector" $sel | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "stockpilot.podSecurity" . | nindent 8 }}
+        runAsUser: 10001
+        runAsGroup: 10001
+      {{- if .Values.backend.runMigrations }}
+      initContainers:
+        - name: migrate
+          image: {{ $img }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          command: ["sh", "-c", "for i in $(seq 1 30); do alembic upgrade head && exit 0; echo 'database not ready, retrying'; sleep 3; done; exit 1"]
+          envFrom:
+            - configMapRef: { name: {{ include "stockpilot.fullname" . }}-config }
+            - secretRef: { name: {{ include "stockpilot.dbSecretName" . }} }
+          securityContext: {{- include "stockpilot.containerSecurity" . | nindent 12 }}
+          resources: {{- toYaml .Values.backend.resources | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      {{- end }}
+      containers:
+        - name: backend
+          image: {{ $img }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: {{ .Values.backend.port }} }
+          envFrom:
+            - configMapRef: { name: {{ include "stockpilot.fullname" . }}-config }
+            - secretRef: { name: {{ include "stockpilot.dbSecretName" . }} }
+          startupProbe:
+            httpGet: { path: {{ .Values.backend.probes.startup.path }}, port: http }
+            periodSeconds: {{ .Values.backend.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.backend.probes.startup.failureThreshold }}
+          livenessProbe:
+            httpGet: { path: {{ .Values.backend.probes.liveness.path }}, port: http }
+            initialDelaySeconds: {{ .Values.backend.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.backend.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet: { path: {{ .Values.backend.probes.readiness.path }}, port: http }
+            initialDelaySeconds: {{ .Values.backend.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.backend.probes.readiness.failureThreshold }}
+          resources: {{- toYaml .Values.backend.resources | nindent 12 }}
+          securityContext: {{- include "stockpilot.containerSecurity" . | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes:
+        - { name: tmp, emptyDir: {} }

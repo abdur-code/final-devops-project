@@ -1,0 +1,78 @@
+{{- if .Values.postgres.enabled }}
+{{- $sel := dict "ctx" . "component" "postgres" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "stockpilot.fullname" . }}-postgres
+  labels:
+    {{- include "stockpilot.labels" . | nindent 4 }}
+    {{- include "stockpilot.selector" $sel | nindent 4 }}
+spec:
+  clusterIP: None
+  selector: {{- include "stockpilot.selector" $sel | nindent 4 }}
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "stockpilot.fullname" . }}-postgres
+  labels:
+    {{- include "stockpilot.labels" . | nindent 4 }}
+    {{- include "stockpilot.selector" $sel | nindent 4 }}
+spec:
+  serviceName: {{ include "stockpilot.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels: {{- include "stockpilot.selector" $sel | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "stockpilot.selector" $sel | nindent 8 }}
+    spec:
+      securityContext:
+        {{- include "stockpilot.podSecurity" . | nindent 8 }}
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          env:
+            - { name: POSTGRES_DB, value: {{ .Values.postgres.database | quote }} }
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: {{ include "stockpilot.dbSecretName" . }}, key: DB_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "stockpilot.dbSecretName" . }}, key: DB_PASSWORD } }
+            # PGDATA in a subdirectory: new EBS volumes contain lost+found
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          readinessProbe:
+            exec: { command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec: { command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""] }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources: {{- toYaml .Values.postgres.resources | nindent 12 }}
+          securityContext: {{- include "stockpilot.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: run, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.postgres.storage.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage.size }}
+{{- end }}

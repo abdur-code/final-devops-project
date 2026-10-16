@@ -1,0 +1,12 @@
+{{- if .Values.monitoring.dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stockpilot.fullname" . }}-dashboard
+  labels:
+    {{- include "stockpilot.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  stockpilot.json: |-
+{{ .Files.Get "dashboards/stockpilot.json" | indent 4 }}
+{{- end }}

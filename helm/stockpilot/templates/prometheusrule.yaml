@@ -1,0 +1,49 @@
+{{- if and .Values.monitoring.prometheusRule.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+{{- $job := printf "%s-backend" (include "stockpilot.fullname" .) }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "stockpilot.fullname" . }}-alerts
+  labels:
+    {{- include "stockpilot.labels" . | nindent 4 }}
+    {{- toYaml .Values.monitoring.prometheusRule.labels | nindent 4 }}
+spec:
+  groups:
+    - name: stockpilot.rules
+      rules:
+        - alert: StockPilotBackendDown
+          expr: sum(up{job="{{ $job }}", namespace="{{ .Release.Namespace }}"}) == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "No StockPilot backend pod is being scraped successfully"
+            description: "Check `kubectl get pods -n {{ .Release.Namespace }}` and the pod logs."
+        - alert: StockPilotHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{job="{{ $job }}", status="5xx"}[5m]))
+              / clamp_min(sum(rate(http_requests_total{job="{{ $job }}"}[5m])), 1e-9) > 0.05
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "More than 5% of API requests are failing with 5xx"
+        - alert: StockPilotSlowResponses
+          expr: |
+            histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="{{ $job }}"}[5m]))) > 0.5
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "p95 API latency is above 500ms"
+        - alert: StockPilotPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="{{ .Release.Namespace }}"}[15m]) > 3
+          labels: { severity: warning }
+          annotations:
+            summary: "Pod {{ "{{ $labels.pod }}" }} restarted more than 3 times in 15 minutes"
+        - alert: StockPilotHPAAtMax
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{namespace="{{ .Release.Namespace }}"}
+              >= kube_horizontalpodautoscaler_spec_max_replicas{namespace="{{ .Release.Namespace }}"}
+          for: 10m
+          labels: { severity: info }
+          annotations:
+            summary: "Backend HPA has been at max replicas for 10 minutes"
+{{- end }}

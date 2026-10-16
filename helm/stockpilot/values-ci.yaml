@@ -1,0 +1,14 @@
+backend:
+  image: { repository: stockpilot-backend, tag: ci, pullPolicy: Never }
+  replicaCount: 1
+frontend:
+  image: { repository: stockpilot-frontend, tag: ci, pullPolicy: Never }
+  replicaCount: 1
+hpa:
+  enabled: false
+podDisruptionBudget:
+  enabled: false
+monitoring:
+  serviceMonitor: { enabled: false }
+  prometheusRule: { enabled: false }
+  dashboard: { enabled: false }

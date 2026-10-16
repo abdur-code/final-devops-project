@@ -1,0 +1,48 @@
+{{- $sel := dict "ctx" . "component" "frontend" }}
+{{- $tag := required "frontend.image.tag is required (an immutable Git commit SHA, never latest)" .Values.frontend.image.tag }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stockpilot.fullname" . }}-frontend
+  labels:
+    {{- include "stockpilot.labels" . | nindent 4 }}
+    {{- include "stockpilot.selector" $sel | nindent 4 }}
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: {{- include "stockpilot.selector" $sel | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "stockpilot.selector" $sel | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "stockpilot.podSecurity" . | nindent 8 }}
+        runAsUser: 101
+        runAsGroup: 101
+      containers:
+        - name: frontend
+          image: "{{ .Values.frontend.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: {{ .Values.frontend.port }} }
+          env:
+            - name: BACKEND_UPSTREAM
+              value: "{{ include "stockpilot.fullname" . }}-backend:{{ .Values.backend.port }}"
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources: {{- toYaml .Values.frontend.resources | nindent 12 }}
+          securityContext: {{- include "stockpilot.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: conf, mountPath: /etc/nginx/conf.d }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        - { name: conf, emptyDir: {} }

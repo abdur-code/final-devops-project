@@ -1,0 +1,19 @@
+StockPilot {{ .Values.environment }} deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Images:
+  backend : {{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}
+  frontend: {{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}
+
+Check it:
+  kubectl get pods,svc,hpa,pvc -n {{ .Release.Namespace }}
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if .Values.ingress.enabled }}
+
+Open: http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}
+  (local clusters: add "127.0.0.1 {{ .Values.ingress.host }}" to /etc/hosts)
+{{- else }}
+
+Open via port-forward:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "stockpilot.fullname" . }}-frontend 8080:80
+  then browse http://localhost:8080
+{{- end }}

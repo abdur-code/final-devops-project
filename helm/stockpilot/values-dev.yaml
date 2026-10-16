@@ -1,0 +1,14 @@
+environment: dev
+backend:
+  replicaCount: 2
+  logLevel: DEBUG
+  enableLoadEndpoint: true
+frontend:
+  replicaCount: 2
+ingress:
+  enabled: true
+  host: stockpilot.local
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4

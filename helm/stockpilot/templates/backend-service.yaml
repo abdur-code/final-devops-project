@@ -1,0 +1,15 @@
+{{- $sel := dict "ctx" . "component" "backend" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "stockpilot.fullname" . }}-backend
+  labels:
+    {{- include "stockpilot.labels" . | nindent 4 }}
+    {{- include "stockpilot.selector" $sel | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{- include "stockpilot.selector" $sel | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.backend.port }}
+      targetPort: http

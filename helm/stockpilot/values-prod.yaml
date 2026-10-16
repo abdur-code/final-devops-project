@@ -1,0 +1,19 @@
+environment: prod
+backend:
+  enableLoadEndpoint: false
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+postgres:
+  existingSecret: stockpilot-db
+  storage:
+    size: 10Gi
+    storageClassName: gp3
+ingress:
+  enabled: true
+  host: stockpilot.example.com
+  tls:
+    enabled: true
+hpa:
+  minReplicas: 2
+  maxReplicas: 10
