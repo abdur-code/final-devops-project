@@ -1,0 +1,7 @@
+resources: [../../../kubernetes]
+patches:
+  - target: { kind: StatefulSet, name: postgres }
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/env/2/valueFrom/secretKeyRef/key
+        value: DB_PASS

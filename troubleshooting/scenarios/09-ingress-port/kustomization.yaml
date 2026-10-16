@@ -1,0 +1,7 @@
+resources: [../../../kubernetes]
+patches:
+  - target: { kind: Ingress, name: stockpilot }
+    patch: |
+      - op: replace
+        path: /spec/rules/0/http/paths/0/backend/service/port/number
+        value: 8080

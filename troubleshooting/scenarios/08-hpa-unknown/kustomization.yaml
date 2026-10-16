@@ -1,0 +1,6 @@
+resources: [../../../kubernetes]
+patches:
+  - target: { kind: Deployment, name: backend }
+    patch: |
+      - op: remove
+        path: /spec/template/spec/containers/0/resources

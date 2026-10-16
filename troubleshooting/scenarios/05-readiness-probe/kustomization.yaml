@@ -1,0 +1,7 @@
+resources: [../../../kubernetes]
+patches:
+  - target: { kind: Deployment, name: backend }
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/readinessProbe/httpGet/path
+        value: /readyz

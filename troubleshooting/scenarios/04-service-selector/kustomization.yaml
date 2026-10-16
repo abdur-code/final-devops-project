@@ -1,0 +1,7 @@
+resources: [../../../kubernetes]
+patches:
+  - target: { kind: Service, name: backend }
+    patch: |
+      - op: replace
+        path: /spec/selector/app
+        value: back-end

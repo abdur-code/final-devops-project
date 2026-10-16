@@ -1,0 +1,7 @@
+resources: [../../../kubernetes]
+patches:
+  - target: { kind: StatefulSet, name: postgres }
+    patch: |
+      - op: add
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: premium-ssd

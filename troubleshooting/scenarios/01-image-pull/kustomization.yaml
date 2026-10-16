@@ -1,0 +1,4 @@
+resources: [../../../kubernetes]
+images:
+  - name: ghcr.io/abdur-code/stockpilot-backend
+    newTag: v9.9.9-hotfix

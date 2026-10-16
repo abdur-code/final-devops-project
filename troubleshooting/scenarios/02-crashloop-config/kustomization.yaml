@@ -1,0 +1,7 @@
+resources: [../../../kubernetes]
+patches:
+  - target: { kind: ConfigMap, name: stockpilot-config }
+    patch: |
+      - op: replace
+        path: /data/DB_HOST
+        value: postgress

@@ -1,0 +1,7 @@
+resources: [../../../kubernetes]
+patches:
+  - target: { kind: NetworkPolicy, name: postgres-allow-backend-only }
+    patch: |
+      - op: replace
+        path: /spec/ingress/0/from/0/podSelector/matchLabels
+        value: { app: api }
