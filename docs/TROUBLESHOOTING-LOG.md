@@ -533,28 +533,65 @@ Dependabot opens upgrade PRs every week, and the nightly workflow re-scans the d
 Scenario: `pipeline: leaked-secret`
 
 ### 1. Identify
-The *Secret scanning (Gitleaks)* job fails.
-
-### 2. Investigate
-```bash
-Actions → Secret scanning → `RuleID: github-pat`, file `application/backend/app/supplier.py` (value redacted)
-```
-
-### 3. Root cause
-Someone committed something that looks like a GitHub token straight into the source code.
-
-### 4. Fix
-Deleting the file in a new commit leaves the token in the Git history, where anyone with the repo can still read it. So first I'd revoke or rotate the token. Then I'd drop the commit from the branch before it's merged (`git reset --hard HEAD~1`, then `git push --force-with-lease`), and have the code read the credential from an environment variable or a Kubernetes Secret.
-
-### 5. Verify
-```bash
-Gitleaks job green; `git log -p` on the branch no longer contains the token.
-```
+PR #9 ("feat: supplier API client") failed in run #15 after 31 seconds. Two jobs went red: *Secret scanning (Gitleaks)* and, to my surprise, *Backend lint + tests*. Build, deploy, push and promote were skipped.
 
 ![scenario 13](screenshots/ts-13.png)
 
+### 2. Investigate
+The Gitleaks job:
+```
+Finding:     ...PPLIER_API_TOKEN = "REDACTED
+Secret:      REDACTED
+RuleID:      github-pat
+File:        application/backend/app/supplier.py
+Line:        2
+Commit:      cce9d423c8cbf26a2fedfeb041d9733dd7ad65f2
+35 commits scanned.
+leaks found: 1
+```
+The backend job failed earlier than the tests, in the ruff lint step:
+```
+S105 Possible hardcoded password assigned to: "SUPPLIER_API_TOKEN"
+ --> app/supplier.py:2:22
+Found 1 error.
+```
+Ruff includes the flake8-bandit rules, and S105 flags any string assigned to a name that looks like a password or token. So the secret was caught twice by two different tools: Gitleaks matched the token format, and ruff matched the variable name.
+
+![scenario 13 gitleaks](screenshots/ts-13-gitleaks.png)
+
+![scenario 13 ruff](screenshots/ts-13-ruff.png)
+
+### 3. Root cause
+The commit hardcoded a GitHub token (`ghp_...`) in the source file instead of reading it from the environment.
+
+The repo has a Gitleaks pre-commit hook in `.pre-commit-config.yaml`, but it only runs after `pre-commit install`, and I had never run that on this laptop. So the commit went through locally and CI was what caught it.
+
+### 4. Fix
+A new commit that deletes the line isn't enough: the token would still be in the branch history, and Gitleaks scans the whole history, so the job would keep failing. I replaced the commit instead. The file now reads the token from an environment variable:
+```python
+import os
+
+SUPPLIER_API_TOKEN = os.environ.get("SUPPLIER_API_TOKEN", "")
+```
+```bash
+git add application/backend/app/supplier.py
+git commit --amend --no-edit
+git push --force-with-lease
+```
+With a real token the first step would be to revoke it on GitHub. Rewriting the branch removes it from the branch, but the old commit can still be opened on GitHub by its SHA (the Gitleaks log even links to it), so anything that was pushed has to be treated as leaked. This token was random text in the right format, so there was nothing to revoke.
+
+### 5. Verify
+Run #16 on the amended commit passed every job, including the image builds and the kind deploy (3m 28s). The Gitleaks job scanned the same 35 commits and reported:
+```
+35 commits scanned.
+no leaks found
+```
+I then closed PR #9 without merging.
+
+![scenario 13 fixed](screenshots/ts-13-fixed.png)
+
 ### 6. Prevention
-The pre-commit hook runs Gitleaks before every commit, and CI scans the full history (`fetch-depth: 0`).
+Run `pre-commit install` once per clone so Gitleaks checks every commit before it leaves the laptop. CI scans the full history on every PR and every code push to `main` (`fetch-depth: 0`) as the backstop, and ruff's S105 rule catches the same mistake from a different angle.
 
 ## 14. Bad image tag through GitOps
 
