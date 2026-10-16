@@ -457,26 +457,39 @@ The chart builds the policy from the same selector helper as the backend Deploym
 Scenario: `pipeline: failing-test`
 
 ### 1. Identify
-The PR's GitHub Actions run goes red at *Backend lint + tests*. Everything after it is *skipped*, so no image is built.
-
-### 2. Investigate
-```bash
-Actions → run → Backend lint + tests → `test_create_item_uppercases_sku`: `'bolt-m8' != 'BOLT-M8'` (3 tests fail)
-git show HEAD   # the commit removed item.sku.upper()
-```
-
-### 3. Root cause
-The commit dropped the line that uppercases SKUs, and the tests expect uppercase SKUs.
-
-### 4. Fix
-Revert the change (`git revert HEAD`) and push.
-
-### 5. Verify
-```bash
-The pipeline run on the branch turns green.
-```
+PR #8 ("feat: keep SKU casing as entered") went red in run #13 after 40 seconds. *Backend lint + tests* failed. The other checks (frontend build, Helm validation, SAST, SCA, Gitleaks, Trivy config) passed, and the image build, kind deploy, GHCR push and GitOps promote jobs were all skipped, so nothing got built.
 
 ![scenario 11](screenshots/ts-11.png)
+
+### 2. Investigate
+The end of the failing step's log:
+```
+Required test coverage of 80% reached. Total coverage: 94.71%
+FAILED tests/test_api.py::test_create_item_uppercases_sku - AssertionError: assert 'bolt-m8' == 'BOLT-M8'
+FAILED tests/test_api.py::test_duplicate_sku_rejected - assert 201 == 409
+FAILED tests/test_api.py::test_update_marks_low_stock - AssertionError: assert ['bolt-m8'] == ['BOLT-M8']
+=================== 3 failed, 9 passed, 1 warning in 0.42s ===================
+```
+Coverage was fine, so the tests themselves were failing. `git show HEAD` on the branch showed the commit had changed `item.sku = item.sku.upper()` to `item.sku = item.sku`.
+
+![scenario 11 test log](screenshots/ts-11-tests.png)
+
+### 3. Root cause
+The commit dropped the line that uppercases SKUs, and three tests depend on it. The duplicate-SKU failure was the one I hadn't expected: without uppercasing, `bolt-m8` and `BOLT-M8` are both accepted (201 instead of 409), so this change would have let duplicate SKUs into the database.
+
+### 4. Fix
+I reverted the commit on the branch and pushed:
+```bash
+git revert --no-edit HEAD
+git push
+```
+
+### 5. Verify
+Run #14 on the same PR passed everything: all seven checks, both image builds with their Trivy scans, and the
+deploy to a throwaway kind cluster (3m 18s in total). GHCR push and GitOps promote were skipped as usual, because they only run on `main`.
+I then closed PR #8 without merging.
+
+![scenario 11 fixed](screenshots/ts-11-fixed.png)
 
 ### 6. Prevention
 The build jobs list the test job under `needs:`, so a failing test stops the pipeline before any image is built or pushed.
