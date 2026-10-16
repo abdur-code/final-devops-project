@@ -288,7 +288,9 @@ Argo CD, so they don't show up in `helm list`.
 
 - A VPC across 2 AZs with 2 public subnets (load balancers, NAT), 2 private subnets (nodes), 1 NAT gateway,
   and subnet tags for load balancer discovery.
-- EKS (Kubernetes 1.34) with a managed node group (AL2023, `t3.medium` × 2, scales from 2 to 4).
+- EKS (Kubernetes 1.34) with a managed node group (AL2023, `m7i-flex.large` × 2, scales from 2 to 4). My AWS
+  account is on the Free plan, which only allows free-tier instance types, and `t3.medium` isn't one of them,
+  so `terraform.tfvars` sets `node_instance_types = ["m7i-flex.large"]` (2 vCPU, 8 GiB).
 - Add-ons: VPC CNI with NetworkPolicy enforcement, CoreDNS, kube-proxy, the Pod Identity agent, and the EBS CSI
   driver, which PVCs need. The EBS CSI driver gets its IAM role through Pod Identity.
 - A GitHub OIDC provider and IAM role so GitHub Actions can deploy without stored AWS keys. The role is limited
@@ -303,9 +305,15 @@ terraform apply tfplan
 $(terraform output -raw configure_kubectl)
 cd .. && ./scripts/bootstrap-cluster.sh
 
-# when finished (≈ US$5–7/day while running)
-terraform destroy
+# when finished (≈ US$5–7/day while running): first remove what Kubernetes created in AWS
+kubectl delete applications -n argocd --all          # stop Argo CD from recreating things
+kubectl delete pvc --all -n stockpilot && kubectl delete pvc --all -n monitoring   # EBS volumes
+helm uninstall ingress-nginx -n ingress-nginx        # the AWS load balancer
+cd terraform && terraform destroy
 ```
+
+Terraform doesn't know about the load balancer that ingress-nginx asks AWS for, or the EBS volumes behind the
+PVCs. If they are still there, `terraform destroy` can't delete the VPC, and the volumes keep costing money.
 
 State is local by default, and `backend.tf.example` switches it to S3 with native locking. More detail is in
 [`terraform/README.md`](terraform/README.md).
@@ -488,19 +496,61 @@ kubectl top pods -n <ns>
 | Grafana dashboard during the load test | ![grafana](docs/screenshots/11-grafana.png) |
 | Loki logs in Grafana Explore | ![loki](docs/screenshots/12-loki-logs.png) |
 
+### AWS (Terraform and EKS)
+
+| | |
+|---|---|
+| `terraform plan`: 64 resources to add | ![plan](docs/screenshots/05-terraform-plan.png) |
+| `terraform apply` complete | ![apply](docs/screenshots/05-terraform-apply.png) |
+| EKS cluster `stockpilot-dev-eks` Active (Kubernetes 1.34) | ![eks](docs/screenshots/06-aws-eks-cluster.png) |
+| Managed node group Active, 2 nodes | ![node group](docs/screenshots/06-aws-eks-nodegroup.png) |
+| The two `m7i-flex.large` nodes in EC2 | ![ec2](docs/screenshots/06-aws-ec2-nodes.png) |
+| Argo CD apps Healthy on EKS, PVC on gp3, app through the AWS load balancer | ![eks kubectl](docs/screenshots/06-eks-kubectl.png) |
+| The app on EKS | ![eks app](docs/screenshots/06-eks-app.png) |
+| `terraform destroy` complete | ![destroy](docs/screenshots/14-terraform-destroy.png) |
+
 ## 16. Lessons learned
 
-- **Gates only work if they are wired in.** Scans that merely report are ignored. `needs:` makes the image
-  build impossible until tests and every scanner pass.
-- **Test the tests.** A custom Semgrep rule looked fine but produced false positives on correct Dockerfiles, and a
-  break script silently failed (`/dev/urandom | head` + `pipefail` = SIGPIPE exit). Both were only caught by running
-  them against known-good and known-bad input.
-- **Pin by digest/SHA, not by tag.** Tags are mutable; `trivy-action` tags were re-published in March 2026.
-  Images are deployed by commit SHA for the same reason: every running pod traces back to one commit.
-- **Liveness ≠ readiness.** `/health` must not touch the database, or a DB blip restarts every pod at once.
-- **HPA needs resource requests** and a metrics source; without them targets show `<unknown>`.
-- **Don't set `replicas` when an HPA owns them**, or Helm/Argo CD and the autoscaler fight on every sync.
-- **Secrets never belong in Git**, not even "dev" ones; history is forever. Generate them in the cluster.
-- **GitOps changes how you operate:** rollbacks are `git revert`, and `kubectl edit` gets undone by self-heal.
-- **StatefulSet volume templates are immutable**; storage mistakes are expensive to fix later.
-- **Cost is a DevOps concern.** A NAT gateway and an idle EKS cluster cost money every hour; `terraform destroy` is part of the workflow.
+The pipeline only protects anything because its jobs depend on each other. The image build has `needs:` on the
+tests and every scanner, so a failed check stops the build instead of just leaving a red mark next to it. Three
+of my four pipeline scenarios ended exactly like that, with the build, deploy and push jobs skipped.
+
+Checks need checking too. One of my custom Semgrep rules flagged perfectly good Dockerfiles, and a break script
+failed silently because `/dev/urandom | head` combined with `pipefail` made it exit on SIGPIPE. My scenario 06
+overlay was broken as well: the API server rejected it because the memory limit was lower than the request, so
+the fault I wanted to show never happened. I only found these by running them against input I knew was good and
+input I knew was bad.
+
+Tags can move, so I pin by SHA. Third-party GitHub Actions are pinned to a commit (the `trivy-action` tags were
+re-published in March 2026), and images are deployed by commit SHA, so every running pod traces back to one
+commit. Scenario 14 showed the gap that's left: a hand-typed tag passed CI, because nothing checks that a tag in
+the GitOps values actually exists in the registry.
+
+A lot of Kubernetes behaviour I knew on paper only clicked once I broke it:
+
+- Liveness and readiness do different jobs. `/health` doesn't touch the database, because if it did, one
+  database hiccup would restart every pod at once. A failing readiness probe never restarts anything; it just
+  keeps the pod out of the Service, and the rollout waits.
+- Pods read ConfigMap values when they start. Fixing the ConfigMap did nothing until I restarted the Deployment.
+- A StatefulSet won't replace a pod that never became Ready, even after the template is fixed, so I had to
+  delete `postgres-0` by hand. Its volume templates can't be changed at all, which makes a storage mistake
+  expensive: the fix is deleting the PVC and the data on it.
+- The HPA needs CPU requests to work out a percentage. Without them it shows `<unknown>` and never scales. And
+  when an HPA owns the replica count, the chart mustn't set `replicas`, or Helm, Argo CD and the autoscaler keep
+  overriding each other.
+- A NetworkPolicy change didn't touch connections that were already open, so everything looked fine until a pod
+  restarted and tried to connect again.
+
+Secrets stay out of Git, "dev" ones included, because deleting a file doesn't remove it from history. The
+database password is generated inside the cluster. In scenario 13 the fake token was caught twice, by Gitleaks
+and by ruff's S105 rule, but only in CI. The pre-commit hook is in the repo, and I had never run
+`pre-commit install` on my laptop.
+
+GitOps changed how I fix things. A rollback is a `git revert`, and a `kubectl edit` just gets undone by
+self-heal. It also taught me that "Synced" doesn't mean "working": after the bad tag was merged, Argo CD said
+Progressing for ten minutes, until the Deployment's progress deadline ran out and it switched to Degraded.
+
+Cost is part of the job too. A NAT gateway and an EKS control plane cost money every hour whether anyone uses
+them or not, so `terraform destroy` belongs in the workflow. Before running it I had to delete the load balancer
+and EBS volumes that Kubernetes had created, since Terraform doesn't know they exist. And because my account is
+on the AWS Free plan, `t3.medium` wasn't allowed, so the nodes run on `m7i-flex.large`.
