@@ -17,7 +17,9 @@ TRAEFIK_VERSION=41.7.1
 METRICS_SERVER_VERSION=3.14.0
 ARGOCD_VERSION=10.10.3
 
-if grep -rq "abdur-code" gitops/apps gitops/argocd; then
+# split so set-github-user.sh does not rewrite the check itself
+PLACEHOLDER="YOUR_GITHUB""_USERNAME"
+if grep -rq "$PLACEHOLDER" gitops/apps gitops/argocd; then
   echo "Error: placeholders still present. Run: ./scripts/set-github-user.sh <your-github-username>"; exit 1
 fi
 
