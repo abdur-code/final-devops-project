@@ -1,0 +1,15 @@
+title = "stockpilot gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders and example files that intentionally look like secrets"
+paths = [
+  '''(^|/)package-lock\.json$''',
+  '''\.example$''',
+]
+regexes = [
+  '''REPLACE_ME''',
+  '''change-me''',
+]

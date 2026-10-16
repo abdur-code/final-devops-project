@@ -1,0 +1,31 @@
+rules:
+  - id: no-hardcoded-db-url-with-password
+    languages: [python]
+    severity: ERROR
+    message: Database URL with an inline password. Read credentials from env / Kubernetes Secret.
+    pattern-regex: postgres(ql)?(\+\w+)?://[^:\s"']+:[^@\s"'{]+@
+    paths:
+      exclude: ["tests/"]
+
+  - id: fastapi-debug-enabled
+    languages: [python]
+    severity: ERROR
+    message: FastAPI debug mode leaks stack traces to clients.
+    pattern: FastAPI(..., debug=True, ...)
+
+  - id: innerhtml-with-variable
+    languages: [javascript]
+    severity: ERROR
+    message: innerHTML with dynamic data is an XSS risk. Use textContent.
+    patterns:
+      - pattern: $EL.innerHTML = $X
+      - pattern-not: $EL.innerHTML = "..."
+      - pattern-not: $EL.innerHTML = `...`
+
+  - id: dockerfile-unpinned-base-image
+    languages: [dockerfile]
+    severity: ERROR
+    message: Pin base images to a version tag. ":latest" makes builds unreproducible and unscannable.
+    pattern-either:
+      - pattern: FROM $IMG:latest
+      - pattern: FROM $IMG:latest AS $NAME

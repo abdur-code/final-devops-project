@@ -1,0 +1,7 @@
+# Accepted risks, review by 2027-01-31
+
+# public EKS endpoint, limited by endpoint_public_access_cidrs
+AWS-0040
+AWS-0041
+# nodes need egress through the NAT for image pulls and AWS APIs
+AWS-0104
