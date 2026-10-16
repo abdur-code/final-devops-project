@@ -117,7 +117,7 @@ def get_item(item_id: int, db: Session = Depends(get_db)):
 @app.post("/api/items", response_model=ItemOut, status_code=status.HTTP_201_CREATED)
 def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
     item = Item(**payload.model_dump())
-    item.sku = item.sku
+    item.sku = item.sku.upper()
     db.add(item)
     try:
         db.commit()
