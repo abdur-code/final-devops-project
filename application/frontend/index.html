@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StockPilot · Inventory</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%2320262B'/><rect x='6' y='18' width='20' height='8' fill='%23F5C518'/><rect x='6' y='7' width='9' height='9' fill='%23F5C518'/></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <header class="bar">
+      <h1 class="brand">StockPilot</h1>
+      <p class="build" id="build">connecting…</p>
+    </header>
+
+    <main class="wrap">
+      <section class="manifest" aria-label="Inventory summary">
+        <div><span class="fig" id="s-skus">–</span><span class="cap">products</span></div>
+        <div><span class="fig" id="s-units">–</span><span class="cap">units on hand</span></div>
+        <div class="warn"><span class="fig" id="s-low">–</span><span class="cap">need reordering</span></div>
+        <div><span class="fig" id="s-value">–</span><span class="cap">stock value</span></div>
+      </section>
+
+      <form id="add" class="add" autocomplete="off">
+        <label>SKU<input name="sku" required maxlength="40" pattern="[A-Za-z0-9\-]+" placeholder="BOLT-M8" /></label>
+        <label class="grow">Product name<input name="name" required maxlength="120" placeholder="M8 hex bolt, zinc" /></label>
+        <label>On hand<input name="quantity" type="number" min="0" value="0" required /></label>
+        <label>Reorder at<input name="reorder_level" type="number" min="0" value="5" required /></label>
+        <label>Unit price<input name="unit_price" type="number" min="0" step="0.01" value="0.00" required /></label>
+        <button type="submit">Add product</button>
+      </form>
+
+      <div class="toolbar">
+        <label class="toggle"><input type="checkbox" id="only-low" /> Show only products that need reordering</label>
+        <p id="msg" role="status" class="msg"></p>
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>SKU</th><th>Product</th><th class="num">On hand</th><th class="num">Reorder at</th><th class="num">Value</th><th></th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p id="empty" class="empty" hidden>No products yet. Add your first one above.</p>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
