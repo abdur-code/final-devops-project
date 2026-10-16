@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stockpilot-config
+data:
+  APP_ENV: raw-manifests
+  LOG_LEVEL: INFO
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: stockpilot
+  ENABLE_LOAD_ENDPOINT: "true"
