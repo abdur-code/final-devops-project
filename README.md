@@ -361,6 +361,8 @@ vulnerability databases; the CycloneDX SBOM attached to each run lists exactly w
 The gate fails on HIGH or CRITICAL CVEs that already have a fixed version; unfixed ones are reported, but an
 upgrade cannot remediate them. A clean result means the image had no known, fixable high-severity
 vulnerability at build time, which is why the nightly workflow re-scans as new CVEs are published.
+The first pipeline run was clean: 0 fixable HIGH/CRITICAL CVEs in the backend image (Debian 13.7, 87 OS
+packages plus the Python dependencies) and in the frontend image (Alpine 3.24.2, 70 OS packages).
 
 The project also uses non-root containers, read-only root filesystems, dropped capabilities, NetworkPolicy,
 Pod Security Admission, OIDC instead of AWS keys, least-privilege job permissions, actions pinned to commit
@@ -456,6 +458,16 @@ kubectl top pods -n <ns>
 | Backend `/metrics` | ![metrics](docs/screenshots/local-metrics-curl.png) |
 | Prometheus target UP | ![prometheus](docs/screenshots/local-prometheus-targets.png) |
 | Grafana dashboard | ![grafana](docs/screenshots/local-grafana.png) |
+
+### CI/CD, security and registry
+
+| | |
+|---|---|
+| Commit history | ![commits](docs/screenshots/m3-commits.png) |
+| Green pipeline | ![pipeline](docs/screenshots/02-pipeline.png) |
+| Trivy scan, backend image | ![trivy backend](docs/screenshots/m6-trivy-backend.png) |
+| Trivy scan, frontend image | ![trivy frontend](docs/screenshots/m6-trivy-frontend.png) |
+| Images in GHCR, tagged with the commit SHA | ![ghcr](docs/screenshots/04-ghcr.png) |
 
 ## 16. Lessons learned
 
