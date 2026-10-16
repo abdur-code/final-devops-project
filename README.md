@@ -471,6 +471,23 @@ kubectl top pods -n <ns>
 | Security gate blocking a vulnerable dependency (PR #7) | ![gate](docs/screenshots/03-security-gate.png) |
 | pip-audit findings that failed the SCA gate | ![sca](docs/screenshots/03-sca-findings.png) |
 
+### Kubernetes, GitOps and monitoring (local kind cluster)
+
+| | |
+|---|---|
+| App through the Ingress (`http://stockpilot.local`) | ![app via ingress](docs/screenshots/gitops-after.png) |
+| `kubectl get pods,svc,hpa,pvc,ingress` | ![kubectl](docs/screenshots/07-kubectl.png) |
+| `helm list -A` and `helm test` | ![helm](docs/screenshots/08-helm.png) |
+| Argo CD: all applications Synced and Healthy | ![argocd](docs/screenshots/13-argocd.png) |
+| Argo CD: `stockpilot-dev` synced to the bot's tag commit | ![argocd tree](docs/screenshots/13-argocd-tree.png) |
+| GitOps before: build `6705b12` | ![before](docs/screenshots/gitops-before.png) |
+| GitOps after: Argo CD rolled out build `39d7cd3` | ![after](docs/screenshots/gitops-after.png) |
+| HPA scaling 2 → 4 under load, then back to 2 | ![hpa](docs/screenshots/09-hpa-scaling.png) |
+| Backend `/metrics` in the cluster | ![metrics](docs/screenshots/m9-metrics-curl.png) |
+| Prometheus targets UP | ![prometheus](docs/screenshots/10-prometheus-targets.png) |
+| Grafana dashboard during the load test | ![grafana](docs/screenshots/11-grafana.png) |
+| Loki logs in Grafana Explore | ![loki](docs/screenshots/12-loki-logs.png) |
+
 ## 16. Lessons learned
 
 - **Gates only work if they are wired in.** Scans that merely report are ignored. `needs:` makes the image
