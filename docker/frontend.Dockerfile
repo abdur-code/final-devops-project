@@ -8,7 +8,7 @@ COPY index.html vite.config.js ./
 COPY src ./src
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.30-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 ARG GIT_SHA=dev
 LABEL org.opencontainers.image.title="stockpilot-frontend" \
       org.opencontainers.image.revision="${GIT_SHA}"
